@@ -20,31 +20,51 @@ require(moonBook)
 library(huxtable)
 library(flextable)
 library(officer)
+source("../02_scripts/some_function.R")
 ```
 
 ## Table list
-### baseline
+### T01 baseline
 ```{r}
 mytable(Dx~.,data=acs)
-moonBook::mytable(sex ~ age+Dx,data = acs, method = 3)  %>% mytable2df() -> table_list$"T1"
+moonBook::mytable(sex ~ age+Dx,data = acs, method = 3)  %>% 
+  mytable2df()  %>% 
+  flextable()-> table_list$"T1"
 moonBook::mytable(sex ~ age+Dx,data = acs) %>% summary()
 ```
 
-###combine table
+
+### T02 multiple simple linear models
 ```{r}
-mytable(sex+DM~.,data=acs)  %>% .[[2]] %>% mytable2df() -> table_list$T2
+fit.table <-
+  lm_table(y_name = "Ozone", df = airquality)  %>%
+  flextable()
 ```
 
-
-
-### linear models
+### T03 multiple models
 ```{r}
-lm_table(y_name="Ozone",df = airquality) -> table_list$T3
+data(diamonds, package = 'ggplot2')
+lm1 <- lm(log(price) ~ carat, diamonds)
+lm2 <- lm(log(price) ~ depth, diamonds)
+lm3 <- lm(log(price) ~ carat + depth, diamonds)
+huxreg(lm1, lm2, lm3) 
 ```
 
-### adjust models
+### T04 correlation table: condition formatting
 ```{r}
+library(psych)
+data(attitude)
+att_corr <- corr.test(as.matrix(attitude))
 
+as_hux(att_corr$r)                                                             %>%
+      set_background_color(where(att_corr$p < 0.05), 'yellow')                 %>%
+      set_background_color(where(att_corr$p < 0.01), 'orange')                 %>%
+      set_background_color(where(row(att_corr$p) == col(att_corr$p)), 'white') %>%
+      huxtable::add_rownames(colname = '')                                     %>%
+      huxtable::add_colnames()                                                 %>%
+      set_all_borders(1)                                                       %>%
+      set_number_format(2)                                                     %>% 
+      as_flextable()
 ```
 
 ###survival analysis
@@ -57,6 +77,7 @@ out1=glm(status~sex+age+rx+obstruct+node4,data=colon)
 out2=glm(status~rx+node4,data=colon)
 ORplot(out1,type=2,show.CI=TRUE,xlab="This is xlab",main="Odds Ratio")
 ```
+
 
 
 ##Export to csv file : mycsv
@@ -100,5 +121,10 @@ zero_docx <- function(table,labels){
   print(target = str_c("table/",labels,".docx"))
 }
 map2(table_list, labels, zero_docx)
+```
+
+```{r}
+read_docx() %>% 
+  body_add_flextable()
 ```
 

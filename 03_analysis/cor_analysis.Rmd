@@ -1,0 +1,132 @@
+---
+title: "figures"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options( "ReporteRs-fontsize" = 12)
+```
+
+[Correlation Analyses in R](http://www.sthda.com/english/wiki/print.php?id=112)
+
+_Correlation matrix analysis is very useful to study dependences or associations between variables_
+
+##load data
+```{r}
+figure_list <- list()
+dir.create("figures")
+```
+## import library
+```{r include=FALSE}
+library(tidyverse)
+library(flextable)
+library(ggpubr)
+library('ReporteRs')
+library(survival)
+library(Cairo)
+library(officer)
+```
+
+## content
+### 01 correlation test 
+```{r}
+data("mtcars")
+my_data <- mtcars[, c(1,3,4,5,6,7)]
+res <- cor.test(my_data$wt, my_data$mpg, 
+                    method = "pearson")
+res
+```
+
+### 02 correlation matrix
+#### flattenCorrMatrix
+```{r}
+library("Hmisc")
+res2 <- rcorr(as.matrix(my_data))
+flattenCorrMatrix(res2$r, res2$P)
+```
+####corstars
+```{r}
+mcor<-round(cor(mtcars),2)
+corstars(mtcars[,1:7])
+```
+
+### 03 correlation visualizaton
+####corrplot() function to plot a correlogram
+```{r}
+res <- cor(my_data)
+library(corrplot)
+# Insignificant correlations are leaved blank
+corrplot(res2$r, type="upper", order="hclust", 
+         p.mat = res2$P, sig.level = 0.01, insig = "blank")
+
+```
+
+####scatter plots
+```{r}
+library("PerformanceAnalytics")
+my_data <- mtcars[, c(1,3,4,5,6,7)]
+chart.Correlation(my_data, histogram=TRUE, pch=19)
+```
+
+####heatmap
+```{r}
+# Get some colors
+col<- colorRampPalette(c("blue", "white", "red"))(20)
+heatmap(x = res, col = col, symm = TRUE)
+```
+
+### 04 correlation scatter plot
+```{r}
+library("ggpubr")
+ggscatter(my_data, x = "mpg", y = "wt", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Miles/(US) gallon", ylab = "Weight (1000 lbs)")
+```
+### 05 An R function to do all you need
+**rquery.cormat()**: 
+    for calculating and visualizing easily acorrelation matrix
+```{r}
+source("http://www.sthda.com/upload/rquery_cormat.r")
+col<- colorRampPalette(c("blue", "white", "red"))(20)
+rquery.cormat(my_data, type = "lower", col = col)
+#Draw a heatmap
+cormat<-rquery.cormat(my_data, graphType="heatmap")
+#Format the correlation table
+rquery.cormat(my_data, type="flatten", graph=FALSE)
+```
+
+## export to ppt
+###single pptx file👍
+```{r}
+library('ReporteRs')
+#new pptx
+pptx.file = "figures/editable-survival-curves.pptx"
+doc <- pptx()
+for (it in figure_list) {
+  doc <-doc %>%
+  addSlide(slide.layout = "Two Content") %>% # Add a new slide into the ppt document
+  addTitle("Survival Curves: Editable Vector Graphics") %>% # Add a slide title
+  addPlot(function()
+  print(it, newpage = FALSE), # Print the survival curves in the powerpoint
+  vector.graphic = TRUE) # Make it editable
+} -> report
+writeDoc(report, file = pptx.file )# write the document to a file
+```
+
+###multiple pptx file 👍
+```{r}
+pptx.file = str_c("figures/",names(figure_list),".pptx")
+
+black_pptx <- function(p, filename){
+  pptx() %>%
+  addSlide(slide.layout = "Two Content") %>% # Add a new slide into the ppt document
+  addTitle("Survival Curves: Editable Vector Graphics") %>% # Add a slide title
+  addPlot(function()
+  print(p, newpage = FALSE), # Print the survival curves in the powerpoint
+  vector.graphic = TRUE)  %>% # Make it editable
+  writeDoc(file = filename)
+}
+map2(figure_list, pptx.file, black_pptx)
+```
