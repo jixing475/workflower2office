@@ -1,0 +1,104 @@
+---
+title: "Untitled"
+output: github_document:
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+##load data
+```{r}
+data(acs)
+table_list <- list()
+```
+## import library
+```{r include=FALSE}
+library(tidyverse)
+require(moonBook)
+library(huxtable)
+library(flextable)
+library(officer)
+```
+
+## Table list
+### baseline
+```{r}
+mytable(Dx~.,data=acs)
+moonBook::mytable(sex ~ age+Dx,data = acs, method = 3)  %>% mytable2df() -> table_list$"T1"
+moonBook::mytable(sex ~ age+Dx,data = acs) %>% summary()
+```
+
+###combine table
+```{r}
+mytable(sex+DM~.,data=acs)  %>% .[[2]] %>% mytable2df() -> table_list$T2
+```
+
+
+
+### linear models
+```{r}
+lm_table(y_name="Ozone",df = airquality) -> table_list$T3
+```
+
+### adjust models
+```{r}
+
+```
+
+###survival analysis
+
+#### Odds Ratio
+```{r}
+require(survival)
+data(colon)
+out1=glm(status~sex+age+rx+obstruct+node4,data=colon)
+out2=glm(status~rx+node4,data=colon)
+ORplot(out1,type=2,show.CI=TRUE,xlab="This is xlab",main="Odds Ratio")
+```
+
+
+##Export to csv file : mycsv
+```{r}
+mycsv(out,file="test.csv")
+mycsv(out1,fil="test1.csv")
+```
+
+##table list and word file 
+ - is flextable objector?
+ - 
+```{r}
+table_list
+dir.create("table")
+```
+
+
+## export to word
+###single docx file👍
+```{r}
+read_docx() %>% 
+  body_add_par("A title", style = "heading 1") %>%
+  body_add_par("Hello world!", style = "Normal") %>%
+  body_add_par("centered text", style = "centered")
+  print(target="table/table.docx")
+black_docx <- function(table){
+  read_docx("table/table.docx") %>% 
+    body_add_break() %>% 
+    body_add_flextable(flextable(table)) %>% 
+    print(target = "table/table.docx")
+}
+map(table_list, black_docx)
+```
+
+###multiple docx file 👍
+```{r}
+labels <- names(table_list)
+zero_docx <- function(table,labels){
+  read_docx() %>% 
+  body_add_flextable(flextable(as.data.frame(table))) %>% 
+  print(target = str_c("table/",labels,".docx"))
+}
+map2(table_list, labels, zero_docx)
+```
+

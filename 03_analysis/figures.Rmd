@@ -1,0 +1,201 @@
+---
+title: "figures"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options( "ReporteRs-fontsize" = 12)
+```
+
+##load data
+```{r}
+set.seed(1234)
+wdata = data.frame(
+   sex = factor(rep(c("F", "M"), each=200)),
+   weight = c(rnorm(200, 55), rnorm(200, 58)))
+head(wdata, 4)
+figure_list <- list()
+dir.create("figures")
+```
+## import library
+```{r include=FALSE}
+library(tidyverse)
+library(flextable)
+library(ggpubr)
+library('ReporteRs')
+library(survival)
+library(Cairo)
+library(officer)
+```
+
+## Figures list 
+### figure 01 Density plot with mean lines and marginal rug
+```{r}
+ggdensity(wdata, x = "weight",
+   add = "mean", rug = TRUE,
+   color = "sex", fill = "sex",
+   palette = c("#00AFBB", "#E7B800"))
+```
+
+###figure 02 Histogram plot with mean lines and marginal rug
+```{r}
+gghistogram(wdata, x = "weight",
+   add = "mean", rug = TRUE,
+   color = "sex", fill = "sex",
+   palette = c("#00AFBB", "#E7B800"))
+```
+
+### figure 03 Box plots with jittered points
+```{r}
+# Load data
+data("ToothGrowth")
+df <- ToothGrowth
+head(df, 4)
+p <- ggboxplot(df, x = "dose", y = "len",
+                color = "dose", palette =c("#00AFBB", "#E7B800", "#FC4E07"),
+                add = "jitter", shape = "dose")
+# Add p-values comparing groups
+ # Specify the comparisons you want
+my_comparisons <- list( c("0.5", "1"), c("1", "2"), c("0.5", "2") )
+p + stat_compare_means(comparisons = my_comparisons)+ # Add pairwise comparisons p-value
+  stat_compare_means(label.y = 50)
+```
+
+### figure 04 Violin plots with box plots inside
+```{r}
+data("ToothGrowth")
+df <- ToothGrowth
+# Change fill color by groups: dose
+# add boxplot with white fill color
+ggviolin(df, x = "dose", y = "len", fill = "dose",
+         palette = c("#00AFBB", "#E7B800", "#FC4E07"),
+         add = "boxplot", add.params = list(fill = "white"))+
+  stat_compare_means(comparisons = my_comparisons, label = "p.signif")+ # Add significance levels
+  stat_compare_means(label.y = 50)                                      # Add global the p-value
+```
+
+###figure 05 Ordered Bar plots
+```{r}
+# Load data
+data("mtcars")
+dfm <- mtcars
+# Convert the cyl variable to a factor
+dfm$cyl <- as.factor(dfm$cyl)
+# Add the name colums
+dfm$name <- rownames(dfm)
+ggbarplot(dfm, x = "name", y = "mpg",
+          fill = "cyl",               # change fill color by cyl
+          color = "white",            # Set bar border colors to white
+          palette = "jco",            # jco journal color palett. see ?ggpar
+          sort.val = "desc",          # Sort the value in dscending order
+          sort.by.groups = FALSE,     # Don't sort inside each group
+          x.text.angle = 90           # Rotate vertically x axis texts
+          )
+```
+
+###figure 06 Dot charts
+```{r}
+ggdotchart(dfm, x = "name", y = "mpg",
+           color = "cyl",                                # Color by groups
+           palette = c("#00AFBB", "#E7B800", "#FC4E07"), # Custom color palette
+           sorting = "ascending",                        # Sort value in descending order
+           add = "segments",                             # Add segments from y = 0 to dots
+           ggtheme = theme_pubr()                        # ggplot2 theme
+           )
+```
+
+```{r}
+ggdotchart(dfm, x = "name", y = "mpg",
+           color = "cyl",                                # Color by groups
+           palette = c("#00AFBB", "#E7B800", "#FC4E07"), # Custom color palette
+           sorting = "descending",                       # Sort value in descending order
+           add = "segments",                             # Add segments from y = 0 to dots
+           rotate = TRUE,                                # Rotate vertically
+           group = "cyl",                                # Order by groups
+           dot.size = 6,                                 # Large dot size
+           label = round(dfm$mpg),                        # Add mpg values as dot labels
+           font.label = list(color = "white", size = 9, 
+                             vjust = 0.5),               # Adjust label parameters
+           ggtheme = theme_pubr()                        # ggplot2 theme
+           )
+```
+
+### figure 07 survival analysis
+```{r}
+# Fit survival curves
+fit<- survfit(Surv(time, status) ~ sex, data = lung)
+# Visualize
+library("survminer")
+p <- ggsurvplot(fit, data = lung,
+         surv.median.line = "hv", # Add medians survival
+         pval = TRUE,             # Add p-value and tervals
+        
+         conf.int = TRUE,        # Add the 95% confidence band
+         risk.table = TRUE,      # Add risk table
+         tables.height = 0.2,
+         tables.theme = theme_cleantable(),
+         palette = "jco",
+         ggtheme = theme_bw()
+    )
+print(p)
+```
+
+##Export to eps or pdf
+###- 
+```{r}
+ggsave(filename = "figures/survival-curves-01.eps",
+       plot = print(p),
+       device = cairo_ps)
+```
+###-
+```{r}
+cairo_ps(filename = "figures/survival-curves-02.eps",
+         width = 7, height = 7, pointsize = 12,
+         fallback_resolution = 300)
+print(p)
+dev.off()
+```
+
+
+##figures list and ppt file 
+ - is flextable objector?
+ - 
+```{r}
+figure_list
+```
+
+
+## export to ppt
+###single pptx file👍
+```{r}
+library('ReporteRs')
+#new pptx
+pptx.file = "figures/editable-survival-curves.pptx"
+doc <- pptx()
+for (it in figure_list) {
+  doc <-doc %>%
+  addSlide(slide.layout = "Two Content") %>% # Add a new slide into the ppt document
+  addTitle("Survival Curves: Editable Vector Graphics") %>% # Add a slide title
+  addPlot(function()
+  print(it, newpage = FALSE), # Print the survival curves in the powerpoint
+  vector.graphic = TRUE) # Make it editable
+} -> report
+writeDoc(report, file = pptx.file )# write the document to a file
+```
+
+###multiple pptx file 👍
+```{r}
+pptx.file = str_c("figures/",names(figure_list),".pptx")
+
+black_pptx <- function(p, filename){
+  pptx() %>%
+  addSlide(slide.layout = "Two Content") %>% # Add a new slide into the ppt document
+  addTitle("Survival Curves: Editable Vector Graphics") %>% # Add a slide title
+  addPlot(function()
+  print(p, newpage = FALSE), # Print the survival curves in the powerpoint
+  vector.graphic = TRUE)  %>% # Make it editable
+  writeDoc(file = filename)
+}
+map2(figure_list, pptx.file, black_pptx)
+```

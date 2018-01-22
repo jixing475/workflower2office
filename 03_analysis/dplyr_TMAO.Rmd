@@ -1,0 +1,547 @@
+---
+title: "TMAO analysis"
+author: "zero"
+date: "6/12/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	results = "hide"
+)
+```
+## 01 library packages
+```{r}
+library(polycor)
+library(multcomp)
+library(Hmisc)
+library(plotly)
+library(tidyverse)
+library(rio)
+library(readxl)
+library(Tmisc)
+library(stringr)
+library(radiant)
+```
+
+### 一些函数
+```{r}
+to_factor <- function(df){#from Tmisc::unfactor
+  id <- sapply(df, is.character)
+    df[id] <- lapply(df[id], as.factor)
+    df
+}
+cha_to_fac <- function(df){
+  id <- sapply(df,is.character)
+  df[id] <- lapply(df[id],as.factor)
+  df
+}
+if_impute <- function(x) {
+  if(shapiro.test(x)$p.value > 0.05){
+     x <- impute(x,fun=mean)
+   }
+   else{
+     x <- impute(x,fun=median)
+   }
+  return(x)
+ }
+
+to_impute <- function(df){#from Tmisc::unfactor
+  id <- sapply(df, is.numeric)
+    df[id] <- lapply(df[id], FUN=if_impute)
+    df[id] <- lapply(df[id], as.numeric)
+    df
+}
+get_num <- function(df){
+  id <- sapply(df,is.numeric)
+  df[id]
+}
+get_unum <- function(df){#from Tmisc::unfactor
+  id <- sapply(df, is.numeric)
+    df[-id]
+}
+get_fac <- function(df){
+  id <- sapply(df,is.factor)
+  df[id]
+}
+get_p <- function(x,fac,paired=FALSE,digits = 3){
+  if(shapiro.test(x)$p.value >0.05){
+    test<- t.test(x~fac,paired = FALSE)
+  }
+  else{
+    test <- wilcox.test(x~fac,paired = FALSE)
+  }
+  return(signif(test$p.value,digits = digits))
+}
+
+get_stat_num <- function(x,na.omit=TRUE,digits=3){
+  library(stringr)
+  library(dplyr)
+  if(na.omit)
+    x <- x[!is.na(x)]
+  if(shapiro.test(x)$p.value >0.05){
+    m <- signif(mean(x),digits = digits)
+    s <- signif(sd(x),digits = digits)
+    stat <- str_c(m,"±",s)
+  }
+  else{
+    m <- signif(median(x),digits = digits)
+    IQR_1 <- signif(quantile(x)[2],digits = digits)
+    IQR_3 <- signif(quantile(x)[4],digits = digits)
+    stat <- str_c(m,"(",IQR_1,"-",IQR_3,")")
+  }
+  return(stat)
+}
+get_stat_mean <- function(x,na.omit=TRUE,digits=3){
+  library(stringr)
+  library(dplyr)
+  if(na.omit)
+    x <- x[!is.na(x)]
+    m <- signif(mean(x),digits = digits)
+    s <- signif(sd(x),digits = digits)
+    stat <- str_c(m,"±",s)
+  return(stat)
+}
+get_stat_median <- function(x,na.omit=TRUE,digits=3){
+  library(stringr)
+  library(dplyr)
+  if(na.omit)
+    x <- x[!is.na(x)]
+    m <- signif(median(x),digits = digits)
+    IQR_1 <- signif(quantile(x)[2],digits = digits)
+    IQR_3 <- signif(quantile(x)[4],digits = digits)
+    stat <- str_c(m,"(",IQR_1,"-",IQR_3,")")
+  return(stat)
+}
+
+get_stat_fac <- function(x,fac=fac){
+  a <- table(x) %>%
+  prop.table()%>%
+  as.matrix() %>%
+  apply(FUN=signif,digit=3,MARGIN = 2) %>%
+  t() %>%
+  t()*100 
+a <- as.data.frame(a)
+a$Freq <- as.data.frame.table(table(x)) %>% .[[2]] 
+a <- a %>%
+  mutate(total= str_c(Freq,"(",V1,"%",")")) %>%
+  select(total)
+
+b_0 <- as.data.frame.table(xtabs(~ x+fac)) %>%
+  rename(count=Freq)
+b <- 
+  xtabs(~ x+fac) %>%
+  prop.table(.,margin = 2) %>%
+  as.data.frame.table() %>%
+  mutate(Freq= signif(Freq,digit=3)) %>%
+  mutate(Freq= Freq*100) %>%
+  left_join(b_0,by=c("x","fac")) %>%
+  mutate(n_Fre=str_c(count,"(",Freq,"%",")")) %>%
+  select(x,fac,n_Fre) %>%
+  spread( key = fac, value = n_Fre)
+
+c <- xtabs(~ x +fac)%>%
+  chisq.test()
+c <- c$p.value
+
+b$Total <- a[[1]]
+b$p_value <- NA
+b$p_value[1] <- c
+b <- select(b,x,Total,everything())
+}
+
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+eGFR_fun <- function(sex,scr,age) {
+  if (sex == "男"){
+    X=min(scr/(88.41*0.9),1)^-0.411
+    Y=max(scr/(88.41*0.9),1)^-1.029
+    Z=0.993^age
+    result <- 141*X*Y*Z 
+  }
+  else{
+    X=min(scr/(88.41*0.7),1)^-0.329
+    Y=max(scr/(88.41*0.7),1)^-1.029
+    Z=0.993^age
+    result <- 141*X*Y*Z*1.018
+  }
+    return(result)
+}
+```
+
+## 02 读取数据 TMAO_1_4_5
+```{r}
+library(readxl)
+TMAO_1_4_5 <- read_excel("20170919_combine.xlsx")
+id_name_tmao <- read_excel("./id_name_tmao.xlsx")
+TMAO_1_4_5 <- dplyr::left_join(TMAO_1_4_5,id_name_tmao,by = c("ID号","姓名"))#combine the table 
+TMAO_1_4_5 <- TMAO_1_4_5[!is.na(TMAO_1_4_5$TMAO),]
+TMAO_1_4_5$ECG <- factor(TMAO_1_4_5$ECG)
+scr_z <- TMAO_1_4_5$肌酐
+sex_z <- TMAO_1_4_5$性别
+age_z <- TMAO_1_4_5$年龄
+eGFR_Z <- c()
+for(i in 1:length(sex_z)){
+  eGFR_Z <- c(eGFR_Z,eGFR_fun(sex = sex_z[i],scr = scr_z[i],age = age_z[i]))
+}
+TMAO_1_4_5$eGFR <- eGFR_Z
+TMAO_1_4_5 %>%
+  remove_empty_cols() %>% remove_empty_rows() %>% Tmisc::convert_to_NA() %>%#remove empty and convert strings to NA
+  mutate(血糖 = str_replace(血糖,"mmol/L","")) %>%
+  mutate(TMA = as.numeric(TMA)) %>%
+  mutate(血糖 = as.numeric(血糖)) %>%
+  mutate(BMI = 体重/((身高/100)^2)) %>%
+  mutate(心胸比 = if_else(心胸比 == "正常","正常","异常")) %>%
+  mutate(心脏超声状态 = if_else(心脏超声 == "正常","正常","异常")) %>%
+  mutate(LVEF_stat =if_else(LVEF <= 0.55, "Abnormal", "Normal"))  %>% 
+  #mutate(eGFR=ifelse(性别=="男",141*(min(肌酐/(88.41*0.9),1)^-0.411)*(max(肌酐/(88.41*0.9),1)^-1.029)*(0.993^年龄) ,141*(min(肌酐/(88.41*0.7),1)^-0.329)*(max(肌酐/(88.41*0.7),1)^-1.029)*(0.993^年龄)*1.018)) %>%
+  mutate(CKD_stage = ifelse(eGFR <= 15,"stage_5","stage_1-4") ) %>%
+    separate(血压, c("收缩压","舒张压"),sep = "/") %>%
+    mutate(收缩压 = as.numeric(收缩压)) %>%
+    mutate(舒张压 = as.numeric(舒张压)) %>%
+    separate('胆红素(总/直接/间接)', c("总胆红素","直接胆红素","间接胆红素"),sep = "/") %>%
+    mutate(总胆红素 = as.numeric(总胆红素)) %>%
+    mutate(直接胆红素 = as.numeric(直接胆红素)) %>%
+    mutate(间接胆红素 = as.numeric(间接胆红素)) %>%
+    separate(入院日期,c("年","月","日")) %>%
+      select(-c(ID号, 补充的超声心动图异常和特殊时间, 心电图)) %>%
+      to_factor() -> TMAO_1_4_5
+
+```
+### 重命名
+```{r}
+library(ellipse)
+library(RColorBrewer)
+library(psych)
+TMAO_1_4_5 %>%
+   select(-c(姓名,年,月,日,心脏超声,TMA,左旋肉碱)) %>%
+   rename(hypertension = 高血压,
+         height = 身高,
+         weight = 体重,
+         age = 年龄,
+         diabetes = 糖尿病,
+         sex = 性别,
+         smoke = 吸烟,
+         drink = 饮酒,
+         SBP = 收缩压,
+         DBP = 舒张压,
+         heart_infarction = 心梗,
+         Cerebrovascular_disease =脑血管病,
+         heart_disease = 心脏病,
+         creatinine = 肌酐,
+         NYHA = 心功能分级,
+         albumin = 白蛋白,
+         uric_acid = 尿酸,
+         total_bilirubin = 总胆红素,
+         direct_bilirubin = 直接胆红素,
+         indirect_bilirubin = 间接胆红素,
+         Cardiothoracic_ratio = 心胸比,
+         blood_sugar = 血糖,
+         C_reactive_protein = C反应蛋白,
+         white_cell = 白细胞,
+         Hemoglobin = 血色素,
+         heart_ultrasound = 心脏超声状态,
+         touxi = 透析#%>%  to_impute()
+         )  -> TMAO_1_4_5
+
+```
+### 查看缺失数据
+```{r}
+sapply(TMAO_1_4_5, function(x)  length(x)-sum(is.na(x)))
+gg_na(TMAO_1_4_5)
+```
+
+## 03_三列统计表格
+```{r}
+ifelse(TMAO_1_4_5$TMAO <= 10.5,"low","T_high") %>%
+  as.factor() -> TMAO_1_4_5$TMAO_group
+#TMAO <- to_impute(TMAO_1_4_5)# 插入数据，使得缺失值补齐
+
+#TMAO_1_4_5$CKD_stage <- as.factor(CKD$CKD_stage) #CKD 分期分三组
+TMAO <- TMAO_1_4_5
+  fac <- TMAO$TMAO_group
+  TMAO %>%
+    get_num() %>%
+    sapply(get_stat_num) -> a#total summary
+  TMAO %>%
+    filter(get("TMAO_group") == levels(fac)[1]) %>%
+    get_num() %>%
+    sapply(get_stat_num) -> b#summary for group_1
+  TMAO %>%
+    filter(get("TMAO_group") == levels(fac)[2]) %>%
+    get_num() %>%
+    sapply(get_stat_num) -> c#summary for group_2
+  TMAO %>%
+    get_num() %>%
+    sapply(get_p,fac=fac) -> d#get the p value
+  result_num <- rbind(a,b,c,d)
+  rownames(result_num) <- c("Total",levels(fac)[1],levels(fac)[2],"p_value")
+  
+rio::export(t(result_num),"num_stat.xlsx",row.names =TRUE) 
+
+  TMAO %>%
+    get_fac() %>%
+    select(-get("TMAO_group")) %>%
+    lapply(.,get_stat_fac,fac=fac)  %>%
+    do.call(rbind,.) -> result_table
+rio::export(result_table,"fac_stat.xlsx",row.names =TRUE) 
+View(t(result_num))
+View(result_table)
+```
+
+
+### 02_三列表之平均值
+```{r}
+ifelse(TMAO_1_4_5$TMAO <= 10.5,"low","T_high") %>%
+  as.factor() -> TMAO_1_4_5$TMAO_group
+#TMAO <- to_impute(TMAO_1_4_5)# 插入数据，使得缺失值补齐
+TMAO <- TMAO_1_4_5
+  fac <- TMAO$TMAO_group
+  TMAO %>%
+    get_num() %>%
+    sapply(get_stat_num) -> a#total summary
+  TMAO %>%
+    filter(get("TMAO_group") == levels(fac)[1]) %>%
+    get_num() %>%
+    sapply(get_stat_mean) -> b#summary for group_1
+  TMAO %>%
+    filter(get("TMAO_group") == levels(fac)[2]) %>%
+    get_num() %>%
+    sapply(get_stat_mean) -> c#summary for group_2
+  TMAO %>%
+    get_num() %>%
+    sapply(get_p,fac=fac) -> d#get the p value
+  result_num <- rbind(a,b,c,d)
+  rownames(result_num) <- c("Total",levels(fac)[1],levels(fac)[2],"p_value")
+rio::export(t(result_num),"num_stat_mean.xlsx",row.names =TRUE) 
+
+```
+
+### 03_三列表之中位数
+```{r}
+ifelse(TMAO_1_4_5$TMAO <= 10.5,"low","T_high") %>%
+  as.factor() -> TMAO_1_4_5$TMAO_group
+#TMAO <- to_impute(TMAO_1_4_5)# 插入数据，使得缺失值补齐
+TMAO <- TMAO_1_4_5
+  fac <- TMAO$TMAO_group
+  TMAO %>%
+    get_num() %>%
+    sapply(get_stat_num) -> a#total summary
+  TMAO %>%
+    filter(get("TMAO_group") == levels(fac)[1]) %>%
+    get_num() %>%
+    sapply(get_stat_median) -> b#summary for group_1
+  TMAO %>%
+    filter(get("TMAO_group") == levels(fac)[2]) %>%
+    get_num() %>%
+    sapply(get_stat_median) -> c#summary for group_2
+  TMAO %>%
+    get_num() %>%
+    sapply(get_p,fac=fac) -> d#get the p value
+  result_num <- rbind(a,b,c,d)
+  rownames(result_num) <- c("Total",levels(fac)[1],levels(fac)[2],"p_value")
+rio::export(t(result_num),"num_stat_median.xlsx",row.names =TRUE) 
+```
+
+
+
+
+## 04 heathly_CKD
+```{r}
+healthy <- read_excel("./healthy.xlsx")
+healthy %>%
+  rename(TMAO = 血浆TMAO浓度) %>%
+  select(TMAO) %>%
+  mutate(CKD_stage="Control") -> healthy
+healthy <- healthy[1:72,]
+CKD <- TMAO_1_4_5 %>%
+  select(TMAO,eGFR) %>%
+  mutate(CKD_stage = cut(eGFR, c(0,15,60,100000), right=FALSE,labels = (3:1)) ) %>%
+  filter(CKD_stage != "NA") %>%
+  select(TMAO,CKD_stage)
+  
+CKD$CKD_stage <- case_when(
+  CKD$CKD_stage == 1~ "stage_1_2",
+  CKD$CKD_stage == 2~ "stage_3_4",
+  CKD$CKD_stage == 3~ "stage_5"
+)
+## 合并数据
+healthy_CKD <- bind_rows(healthy,CKD)
+result <- explore(dataset = "healthy_CKD", vars = "TMAO", byvar = "CKD_stage", 
+                  fun = c( "mean_rm", "sd_rm","length"), nr = 4)
+summary(result)
+particular_column_number_effectively <- function (df) 
+{
+    id <- sapply(df, is.numeric)
+    df[id] <- lapply(df[id], signif,digits = 2)
+    df
+}
+explore(dataset = "healthy_CKD", vars = "TMAO", byvar = "CKD_stage", 
+                  fun = c(  "length","mean_rm","sd_rm","median_rm","p25","p75"), nr = 4) %>% 
+  .$tab %>% 
+  select(-variable)   %>% 
+  particular_column_number_effectively() %>% 
+  mutate(IQR = str_c(p25,"-",p75)) %>% 
+  select(-p25,-p75) %>% 
+  t()  %>% 
+  clipr::write_clip()
+  
+fit <- aov(TMAO~CKD_stage,data = healthy_CKD)
+summary(fit)
+##百分比
+table(CKD$CKD_stage) %>%
+  prop.table()%>%
+  as.matrix() %>%
+  apply(FUN=signif,digit=3,MARGIN = 2) %>%
+  t() %>%
+  t()*100 
+## TMAO：CKD vs 健康 t检验
+t.test(CKD$TMAO,healthy$TMAO)
+#   ± sd
+sd(CKD$TMAO)
+sd(healthy$TMAO)
+#2.6±3.1 vs 9.4±11.1 vs 47.2±43.6
+CKD %>%
+  filter(CKD_stage=="stage_5") %>%
+  select(TMAO) %>%
+  .$TMAO %>%
+    sd()
+```
+### UCG 统计信息
+```{r}
+explore(dataset = "TMAO_1_4_5", vars = "TMAO", byvar = "heart_ultrasound", 
+                  fun = c(  "length","mean_rm","sd_rm","median_rm","p25","p75"), nr = 2) %>% 
+  .$tab %>% 
+  select(-variable)   %>% 
+  particular_column_number_effectively() %>% 
+  mutate(IQR = str_c(p25,"-",p75)) %>% 
+  select(-p25,-p75) %>% 
+  t()  %>% 
+  clipr::write_clip()
+```
+
+### 心胸比 统计信息
+```{r}
+explore(dataset = "TMAO_1_4_5", vars = "TMAO", byvar = "Cardiothoracic_ratio", 
+                  fun = c(  "length","mean_rm","sd_rm","median_rm","p25","p75"), nr = 2) %>% 
+  .$tab %>% 
+  select(-variable)   %>% 
+  particular_column_number_effectively() %>% 
+  mutate(IQR = str_c(p25,"-",p75)) %>% 
+  select(-p25,-p75) %>% 
+  t()  %>% 
+  clipr::write_clip()
+```
+
+
+## 生成 prism 数据
+### UCG
+```{r}
+TMAO_1_4_5 %>%
+  filter(TMAO < 200) %>% 
+  select(TMAO,heart_ultrasound) %>%
+  arrange(heart_ultrasound) %>%
+  clipr::write_clip()
+```
+### 心胸比
+```{r}
+TMAO_1_4_5 %>%
+  filter(TMAO < 100) %>% 
+  select(TMAO,Cardiothoracic_ratio) %>%
+  arrange(Cardiothoracic_ratio) %>%
+  clipr::write_clip()
+```
+### eGFR 相关性
+```{r}
+TMAO_1_4_5 %>%
+  select(eGFR,TMAO) %>%
+  arrange(eGFR) %>%
+  lm(TMAO ~ eGFR,data = .) -> lm.fit 
+
+plot(lm.fit)
+plot(hatvalues(lm.fit))
+
+```
+
+
+```{r}
+TMAO_1_4_5[sapply(TMAO_1_4_5, is.numeric)]  %>% 
+  dplyr::select(TMAO,everything()) -> data.rad
+result <- correlation(dataset = "data.rad", vars = c("TMAO","age", "LVEF",  "SBP", "DBP", "creatinine",
+                                                       "BUN", "albumin", "uric_acid", "total_bilirubin", 
+                                                       "CHOL", "TG", "LDL", "VLDL", "HDL", "blood_sugar",
+                                                       "C_reactive_protein", "white_cell", "Hemoglobin", "eGFR",
+                                                      "BMI"), method = "spearman")
+summary(result, covar = TRUE)
+plot(result, n = 1000)
+
+```
+
+```{r}
+TMAO_1_4_5 %>% 
+  select(TMAO,eGFR) %>% 
+  mutate(stage = case_when(
+                              eGFR <= 15 ~ "Stage V",
+                              eGFR > 15 & eGFR <= 60 ~ "Stage III+IV",
+                              eGFR > 60 ~ "Stage I+II")) -> TMAO_V_III_I
+ifelse(TMAO_V_III_I$TMAO <= 10.5,"low","high") %>%
+  as.factor() -> TMAO_V_III_I$TMAO_group
+  fac <- TMAO_V_III_I$TMAO_group
+  TMAO_V_III_I$stage <- as.factor(TMAO_V_III_I$stage)
+  TMAO_V_III_I %>% 
+    get_fac() %>%
+    select(-get("TMAO_group")) %>%
+    lapply(.,get_stat_fac,fac=fac)  %>%
+    do.call(rbind,.) -> result_table
+rio::export(result_table,"fac_stat.xlsx",row.names =TRUE) 
+View(result_table)
+  
+                   
+```
+```{r}
+TMAO_1_4_5 %>% select(TMAO,TMA,左旋肉碱) %>%
+  filter(!is.na(TMA)) -> data.roujian
+   #lm(TMAO ~ 左旋肉碱+TMA,data = .) -> lm.fit 
+summary(lm.fit)
+plot(lm.fit)
+plot(hatvalues(lm.fit))
+```
+
+
+
